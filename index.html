@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="./img.png">
+<title>pdf & img Compressor Tool</title>
+
+<style>
+body{
+  font-family: Arial;
+  background:#0f172a;
+  color:white;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  margin:0;
+}
+
+.box{
+  background:#1e293b;
+  padding:25px;
+  border-radius:12px;
+  text-align:center;
+  width:95%;
+  max-width:460px;
+}
+
+input,select{
+  margin:8px 0;
+  padding:8px;
+  width:100%;
+  border-radius:6px;
+  border:none;
+}
+
+button{
+  background:#22c55e;
+  border:none;
+  padding:14px;
+  color:white;
+  font-size:16px;
+  border-radius:8px;
+  cursor:pointer;
+  width:100%;
+}
+
+#customBox{
+  display:none;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+<h2>Ultimate Compressor Tool</h2>
+
+<input type="file" id="fileInput" accept="image/*,application/pdf">
+
+<label>Target Size:</label>
+<select id="target">
+  <option value="50">50 KB</option>
+  <option value="100">100 KB</option>
+  <option value="200">200 KB</option>
+  <option value="500">500 KB</option>
+  <option value="1000">1 MB</option>
+  <option value="2000">2 MB</option>
+</select>
+
+<label>Output Format:</label>
+<select id="format">
+  <option value="pdf">PDF</option>
+  <option value="jpg">JPG/JPEG</option>
+  <option value="png">PNG</option>
+  <option value="webp">WebP</option>
+</select>
+
+<label>Resize / Ratio:</label>
+<select id="ratio" onchange="toggleCustom()">
+  <option value="original">Original</option>
+  <option value="square">1:1 Square</option>
+  <option value="16:9">16:9</option>
+  <option value="passport">Passport</option>
+  <option value="a4">A4</option>
+  <option value="custom">Custom Size</option>
+</select>
+
+<!-- CUSTOM SIZE BOX -->
+<div id="customBox">
+  <label>Custom Width (px):</label>
+  <input type="number" id="width">
+
+  <label>Custom Height (px):</label>
+  <input type="number" id="height">
+</div>
+
+<button onclick="processFile()">Compress & Convert</button>
+
+<small>DEVELOPED BY AARYAN JAIN</small>
+</div>
+
+<script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+<script>
+function toggleCustom(){
+  const ratio=document.getElementById("ratio").value;
+  document.getElementById("customBox").style.display =
+    (ratio==="custom") ? "block" : "none";
+}
+
+function download(blob,name){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=name;
+  a.click();
+}
+
+function getSize(w,h,type){
+
+  if(type==="custom"){
+    const cw=parseInt(document.getElementById("width").value);
+    const ch=parseInt(document.getElementById("height").value);
+    if(cw && ch) return [cw,ch];
+  }
+
+  if(type==="square") return [Math.min(w,h),Math.min(w,h)];
+  if(type==="16:9") return [w, w*9/16];
+  if(type==="passport") return [413,531];
+  if(type==="a4") return [595,842];
+
+  return [w,h];
+}
+
+async function processFile(){
+
+  const file=document.getElementById("fileInput").files[0];
+  const targetKB=parseInt(document.getElementById("target").value);
+  const format=document.getElementById("format").value;
+  const ratio=document.getElementById("ratio").value;
+
+  if(!file){alert("Select file");return;}
+
+  if(file.type.startsWith("image"))
+    processImage(file,targetKB,format,ratio);
+  else if(file.type==="application/pdf")
+    processPDF(file,targetKB,format,ratio);
+}
+
+function dataURLtoBlob(dataurl){
+  const arr=dataurl.split(',');
+  const mime=arr[0].match(/:(.*?);/)[1];
+  const bstr=atob(arr[1]);
+  let n=bstr.length;
+  const u8arr=new Uint8Array(n);
+  while(n--) u8arr[n]=bstr.charCodeAt(n);
+  return new Blob([u8arr],{type:mime});
+}
+
+/* IMAGE */
+async function processImage(file,targetKB,format,ratio){
+
+  const img=new Image();
+  img.src=URL.createObjectURL(file);
+
+  img.onload=async function(){
+
+    let [w,h]=getSize(img.width,img.height,ratio);
+
+    const canvas=document.createElement("canvas");
+    const ctx=canvas.getContext("2d");
+
+    canvas.width=w;
+    canvas.height=h;
+
+    ctx.drawImage(img,0,0,w,h);
+
+    let quality=0.9;
+    let blob;
+
+    const mime = (format==="png")?"image/png":
+                 (format==="webp")?"image/webp":
+                 "image/jpeg";
+
+    do{
+      blob=dataURLtoBlob(canvas.toDataURL(mime,quality));
+      quality-=0.05;
+    }while(blob.size/1024>targetKB && quality>0.05);
+
+    if(format==="pdf"){
+      const {PDFDocument}=PDFLib;
+      const pdf=await PDFDocument.create();
+      const jpg=await pdf.embedJpg(await blob.arrayBuffer());
+      const page=pdf.addPage([w,h]);
+      page.drawImage(jpg,{x:0,y:0,width:w,height:h});
+      const bytes=await pdf.save();
+      download(new Blob([bytes],{type:"application/pdf"}),"compressed.pdf");
+    }
+    else download(blob,"compressed."+format);
+  }
+}
+
+/* PDF */
+async function processPDF(file,targetKB,format,ratio){
+
+  const pdfjsLib=window['pdfjs-dist/build/pdf'];
+  const pdfData=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:pdfData}).promise;
+
+  let quality=0.9;
+
+  while(true){
+
+    const {PDFDocument}=PDFLib;
+    const newPdf=await PDFDocument.create();
+    let firstImage=null;
+
+    for(let i=1;i<=pdf.numPages;i++){
+
+      const page=await pdf.getPage(i);
+      const viewport=page.getViewport({scale:1});
+
+      let [w,h]=getSize(viewport.width,viewport.height,ratio);
+
+      const canvas=document.createElement("canvas");
+      const ctx=canvas.getContext("2d");
+
+      canvas.width=w;
+      canvas.height=h;
+
+      await page.render({
+        canvasContext:ctx,
+        viewport:page.getViewport({scale:w/viewport.width})
+      }).promise;
+
+      const dataURL=canvas.toDataURL("image/jpeg",quality);
+      const blob=dataURLtoBlob(dataURL);
+
+      if(!firstImage) firstImage=blob;
+
+      const img=await newPdf.embedJpg(await blob.arrayBuffer());
+      const p=newPdf.addPage([w,h]);
+      p.drawImage(img,{x:0,y:0,width:w,height:h});
+    }
+
+    const bytes=await newPdf.save();
+
+    if(format!=="pdf"){
+      if(firstImage.size/1024<=targetKB || quality<=0.1){
+        download(firstImage,"compressed."+format);
+        break;
+      }
+    }
+    else{
+      if(bytes.length/1024<=targetKB || quality<=0.1){
+        download(new Blob([bytes],{type:"application/pdf"}),"compressed.pdf");
+        break;
+      }
+    }
+
+    quality-=0.1;
+  }
+}
+</script>
+
+</body>
+</html>
